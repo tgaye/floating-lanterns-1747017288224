@@ -1,0 +1,347 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Floating Lanterns</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0a0a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            position: relative;
+        }
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            text-align: center;
+            width: 100%;
+            font-size: 14px;
+            pointer-events: none;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.8.0/lib/p5.js"></script>
+
+<base target="_self">
+
+
+    </head><body><div id="canvas-container">
+        <div class="instructions">Click or drag to release lanterns</div>
+    </div>
+
+    <script>
+        const sketch = function(p) {
+            let lanterns = [];
+            let stars = [];
+            let mountains = [];
+            let windForce = 0;
+            let lastWindChange = 0;
+            let bgGradient;
+            let lastInteractionTime = 0;
+            let autoReleaseTimer = 0;
+            let canvas;
+
+            class Lantern {
+                constructor(x, y) {
+                    this.pos = p.createVector(x, y);
+                    this.vel = p.createVector(p.random(-0.2, 0.2), p.random(-1, -0.5));
+                    this.size = p.random(20, 40);
+                    this.flickerSpeed = p.random(0.05, 0.15);
+                    this.flickerOffset = p.random(100);
+                    this.brightness = p.random(0.7, 1);
+                    this.hue = p.random(20, 40);
+                    this.life = 0;
+                    this.maxLife = p.random(500, 800);
+                    this.trail = [];
+                    this.maxTrailLength = 15;
+                }
+
+                update() {
+                    this.life++;
+                    
+                    // Apply wind force
+                    this.vel.x += windForce * 0.1;
+                    
+                    // Natural drift
+                    this.vel.x += p.random(-0.05, 0.05);
+                    this.vel.y += p.random(-0.02, 0.02);
+                    
+                    // Constrain velocity
+                    this.vel.limit(1.5);
+                    
+                    // Update position
+                    this.pos.add(this.vel);
+                    
+                    // Flickering effect
+                    this.brightness = 0.7 + p.noise(this.flickerOffset + p.frameCount * this.flickerSpeed) * 0.3;
+                    
+                    // Add to trail
+                    this.trail.push(this.pos.copy());
+                    if (this.trail.length > this.maxTrailLength) {
+                        this.trail.shift();
+                    }
+                    
+                    // Check boundaries
+                    if (this.pos.x < -this.size) this.pos.x = p.width + this.size;
+                    if (this.pos.x > p.width + this.size) this.pos.x = -this.size;
+                    if (this.pos.y < -this.size * 2) this.pos.y = p.height + this.size;
+                }
+
+                draw() {
+                    // Draw trail
+                    p.noFill();
+                    for (let i = 0; i < this.trail.length - 1; i++) {
+                        const alpha = p.map(i, 0, this.trail.length, 30, 10);
+                        const trailSize = p.map(i, 0, this.trail.length, this.size * 0.3, 2);
+                        p.stroke(this.hue, 80, 80, alpha);
+                        p.strokeWeight(trailSize);
+                        p.line(this.trail[i].x, this.trail[i].y, this.trail[i+1].x, this.trail[i+1].y);
+                    }
+                    
+                    // Draw lantern
+                    p.colorMode(p.HSB);
+                    const glowSize = this.size * 3 * this.brightness;
+                    
+                    // Glow effect
+                    for (let i = glowSize; i > 0; i -= glowSize/5) {
+                        const alpha = p.map(i, glowSize, 0, 10, 2);
+                        p.fill(this.hue, 60, 90, alpha);
+                        p.noStroke();
+                        p.circle(this.pos.x, this.pos.y, i);
+                    }
+                    
+                    // Lantern body
+                    p.fill(this.hue, 80, 90 * this.brightness);
+                    p.stroke(this.hue, 100, 60);
+                    p.strokeWeight(1);
+                    p.circle(this.pos.x, this.pos.y, this.size);
+                    
+                    // Lantern details
+                    p.stroke(this.hue, 100, 40);
+                    p.strokeWeight(1);
+                    p.line(this.pos.x - this.size/3, this.pos.y - this.size/4, this.pos.x + this.size/3, this.pos.y - this.size/4);
+                    p.line(this.pos.x, this.pos.y - this.size/2, this.pos.x, this.pos.y - this.size/4);
+                    
+                    p.colorMode(p.RGB);
+                }
+
+                isDone() {
+                    return this.life > this.maxLife;
+                }
+            }
+
+            class Star {
+                constructor() {
+                    this.x = p.random(p.width);
+                    this.y = p.random(p.height * 0.6);
+                    this.size = p.random(0.5, 2);
+                    this.brightness = p.random(0.3, 1);
+                    this.twinkleSpeed = p.random(0.01, 0.05);
+                    this.twinkleOffset = p.random(100);
+                }
+
+                draw() {
+                    const currentBrightness = this.brightness * (0.7 + p.noise(this.twinkleOffset + p.frameCount * this.twinkleSpeed) * 0.6);
+                    p.fill(255, 255, 255, currentBrightness * 255);
+                    p.noStroke();
+                    p.circle(this.x, this.y, this.size);
+                }
+            }
+
+            class Mountain {
+                constructor(x, width, height) {
+                    this.x = x;
+                    this.width = width;
+                    this.height = height;
+                    this.color = p.color(10, 30, 15 + p.random(20));
+                    this.detail = [];
+                    
+                    // Create mountain silhouette details
+                    for (let i = 0; i < 10; i++) {
+                        this.detail.push({
+                            x: p.random(width),
+                            y: p.random(height * 0.8),
+                            size: p.random(5, 20)
+                        });
+                    }
+                }
+
+                draw() {
+                    p.push();
+                    p.translate(this.x, p.height - this.height);
+                    
+                    // Base shape
+                    p.fill(this.color);
+                    p.noStroke();
+                    p.beginShape();
+                    p.vertex(0, this.height);
+                    p.vertex(this.width/3, this.height * 0.7);
+                    p.vertex(this.width/2, this.height * 0.4);
+                    p.vertex(this.width * 0.7, this.height * 0.6);
+                    p.vertex(this.width, this.height);
+                    p.endShape(p.CLOSE);
+                    
+                    // Silhouette details
+                    p.fill(0, 0, 0, 50);
+                    for (const d of this.detail) {
+                        p.circle(d.x, d.y, d.size);
+                    }
+                    
+                    p.pop();
+                }
+            }
+
+            p.setup = function() {
+                canvas = p.createCanvas(p.min(p.windowWidth, 1200), p.windowHeight * 0.9);
+                canvas.parent('canvas-container');
+                p.colorMode(p.RGB);
+                
+                // Create background gradient
+                createBackgroundGradient();
+                
+                // Create stars
+                for (let i = 0; i < 200; i++) {
+                    stars.push(new Star());
+                }
+                
+                // Create mountains
+                const mountainCount = 5;
+                for (let i = 0; i < mountainCount; i++) {
+                    const x = p.map(i, 0, mountainCount, -p.width * 0.2, p.width * 1.2);
+                    const width = p.width * p.random(0.3, 0.6);
+                    const height = p.height * p.random(0.2, 0.4);
+                    mountains.push(new Mountain(x, width, height));
+                }
+                
+                // Initial lanterns
+                for (let i = 0; i < 5; i++) {
+                    lanterns.push(new Lantern(
+                        p.random(p.width),
+                        p.random(p.height * 0.5, p.height)
+                    ));
+                }
+            };
+
+            function createBackgroundGradient() {
+                bgGradient = p.createGraphics(p.width, p.height);
+                bgGradient.colorMode(p.HSB);
+                
+                for (let y = 0; y < p.height; y++) {
+                    const inter = p.map(y, 0, p.height, 0, 1);
+                    const c1 = p.color(240, 80, 10);
+                    const c2 = p.color(260, 90, 5);
+                    const bgColor = p.lerpColor(c1, c2, inter);
+                    bgGradient.stroke(bgColor);
+                    bgGradient.line(0, y, p.width, y);
+                }
+                
+                bgGradient.colorMode(p.RGB);
+            }
+
+            p.draw = function() {
+                // Update wind
+                if (p.millis() - lastWindChange > 5000) {
+                    windForce = p.random(-0.5, 0.5);
+                    lastWindChange = p.millis();
+                }
+                
+                // Draw background
+                p.image(bgGradient, 0, 0);
+                
+                // Draw stars
+                for (const star of stars) {
+                    star.draw();
+                }
+                
+                // Draw mountains
+                for (const mountain of mountains) {
+                    mountain.draw();
+                }
+                
+                // Update and draw lanterns
+                for (let i = lanterns.length - 1; i >= 0; i--) {
+                    lanterns[i].update();
+                    lanterns[i].draw();
+                    
+                    if (lanterns[i].isDone()) {
+                        lanterns.splice(i, 1);
+                    }
+                }
+                
+                // Auto-release lanterns when inactive
+                if (p.millis() - lastInteractionTime > 10000 && lanterns.length < 15) {
+                    autoReleaseTimer += p.deltaTime;
+                    if (autoReleaseTimer > 2000) {
+                        lanterns.push(new Lantern(
+                            p.random(p.width),
+                            p.height + 50
+                        ));
+                        autoReleaseTimer = 0;
+                    }
+                }
+            };
+
+            p.mousePressed = function() {
+                lastInteractionTime = p.millis();
+                releaseLantern(p.mouseX, p.mouseY);
+            };
+
+            p.mouseDragged = function() {
+                lastInteractionTime = p.millis();
+                if (p.frameCount % 3 === 0) {
+                    releaseLantern(p.mouseX, p.mouseY);
+                }
+            };
+
+            function releaseLantern(x, y) {
+                if (lanterns.length < 30) {
+                    lanterns.push(new Lantern(x, y));
+                }
+            }
+
+            p.touchStarted = function() {
+                lastInteractionTime = p.millis();
+                releaseLantern(p.mouseX, p.mouseY);
+                return false;
+            };
+
+            p.touchMoved = function() {
+                lastInteractionTime = p.millis();
+                if (p.frameCount % 3 === 0) {
+                    releaseLantern(p.mouseX, p.mouseY);
+                }
+                return false;
+            };
+
+            p.windowResized = function() {
+                p.resizeCanvas(p.min(p.windowWidth, 1200), p.windowHeight * 0.9);
+                createBackgroundGradient();
+                
+                // Reposition stars
+                stars = [];
+                for (let i = 0; i < 200; i++) {
+                    stars.push(new Star());
+                }
+            };
+        };
+
+        new p5(sketch);
+    </script>
+
+              
+          
+                
+          
+              
+</body></html>
